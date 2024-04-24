@@ -1,0 +1,9 @@
+openai
+setuptools-rust
+ffmpeg
+langchain
+fastapi
+uvicorn
+python-multipart
+mangum
+
