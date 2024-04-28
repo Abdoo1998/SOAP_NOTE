@@ -1,5 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
+import os
+import subprocess
 import wave
 from openai import OpenAI
 from langchain.chat_models import ChatOpenAI
@@ -7,7 +9,7 @@ from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
 
 # Replace with your actual OpenAI API key
-api_key = "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"
+api_key = "sk-proj-UCEe8mKLL1NBsF2JGOSDT3BlbkFJFhLtjUUwsRQ7zUYEnEuA"
 
 # Define maximum audio duration (in seconds)
 max_duration = 120  # 2 minutes
@@ -16,6 +18,14 @@ app = FastAPI()
 
 class AudioResponse(BaseModel):
     translated_text: str
+
+def convert_to_wav(input_file, output_file):
+    try:
+        subprocess.run(["ffmpeg", "-i", input_file, "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", output_file], check=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error converting audio to WAV: {e}")
+        return False
 
 def split_audio_and_translate(audio_path):
     """
@@ -65,7 +75,6 @@ def split_audio_and_translate(audio_path):
                         print(f"OpenAI Error during chunk translation: {e}")
                         short_chunks.append("")  # Store empty string for short chunk
                     # Remove temporary audio file
-                    import os
                     os.remove(f"chunk_{i}.wav")
             if short_chunks:
                 print(f"Warning: Encountered {len(short_chunks)} short audio chunks.")
@@ -74,11 +83,16 @@ def split_audio_and_translate(audio_path):
 @app.post("/translate_audio/")
 async def translate_audio(audio_file: UploadFile = File(...)):
     # Save audio file
-    with open("temp_audio.wav", "wb") as temp_audio:
+    with open("temp_audio", "wb") as temp_audio:
         temp_audio.write(await audio_file.read())
 
+    # Convert audio to WAV format
+    converted_audio_file = "temp_audio.wav"
+    if not convert_to_wav("temp_audio", converted_audio_file):
+        return {"error": "Failed to convert audio to WAV format"}
+
     # Translate audio
-    conversation = split_audio_and_translate("temp_audio.wav")
+    conversation = split_audio_and_translate(converted_audio_file)
     openai = ChatOpenAI(model_name='gpt-4',api_key=api_key)
 
     conversation_prompt = PromptTemplate.from_template(f"""Convert the following doctor-patient dialogue ({conversation}) into a SOAP note format, ensuring correct medical terminology and including a well-structured conclusion.""")
@@ -91,7 +105,3 @@ async def translate_audio(audio_file: UploadFile = File(...)):
     medical_note = process_conversation_chain.run(data)
 
     return {"medical_note": medical_note}
-
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
