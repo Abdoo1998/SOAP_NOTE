@@ -9,7 +9,7 @@ from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
 
 # Replace with your actual OpenAI API key
-api_key = "sk-proj-UCEe8mKLL1NBsF2JGOSDT3BlbkFJFhLtjUUwsRQ7zUYEnEuA"
+api_key = "sk-proj-Edyi0RrEEagWgkni6OEbT3BlbkFJp3KpGDCOzWQvtlxylSdw"
 
 # Define maximum audio duration (in seconds)
 max_duration = 120  # 2 minutes
