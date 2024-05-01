@@ -19,6 +19,8 @@ if api_key is None:
     exit()
 
 # Define maximum audio duration (in seconds)
+
+# Define maximum audio duration (in seconds)
 max_duration = 120  # 2 minutes
 
 app = FastAPI()
@@ -79,7 +81,9 @@ def split_audio_and_translate(audio_data):
             if short_chunks:
                 print(f"Warning: Encountered {len(short_chunks)} short audio chunks.")
             os.remove(wav_filename)
+        
             return translated_text
+        
 
 @app.get("/")
 def read_root():
@@ -94,7 +98,7 @@ async def translate_audio(audio_file: UploadFile = File(...)):
     conversation = split_audio_and_translate(audio_data)
     openai = ChatOpenAI(model_name='gpt-4',api_key=api_key)
 
-    conversation_prompt = PromptTemplate.from_template(f"""Convert the following doctor-patient dialogue ({conversation}) into a SOAP note json format, ensuring correct medical terminology and including a well-structured conclusion.""")
+    conversation_prompt = PromptTemplate.from_template(f"""Convert the following doctor-patient dialogue ({conversation}) into a SOAP note format, ensuring correct medical terminology and including a well-structured conclusion.""")
 
     process_conversation_chain = LLMChain(
     llm=openai, prompt=conversation_prompt)
