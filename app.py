@@ -81,7 +81,11 @@ def split_audio_and_translate(audio_data):
             os.remove(wav_filename)
             return translated_text
 
-@app.post("/translate_audio/")
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
+
+@app.post("/soap_note/")
 async def translate_audio(audio_file: UploadFile = File(...)):
     # Read audio file data into memory
     audio_data = await audio_file.read()
