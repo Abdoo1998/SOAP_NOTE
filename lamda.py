@@ -86,7 +86,7 @@ def split_audio_and_translate(audio_path):
                 print(f"Warning: Encountered {len(short_chunks)} short audio chunks.")
             return translated_text
 
-@app.post("/translate_audio/")
+@app.post("/SOAP_NOTE/")
 async def translate_audio(audio_file: UploadFile = File(...)):
     # Save audio file
     with open("temp_audio", "wb") as temp_audio:
