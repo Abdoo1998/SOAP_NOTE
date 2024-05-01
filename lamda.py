@@ -9,7 +9,13 @@ from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
 
 # Replace with your actual OpenAI API key
-api_key = "sk-proj-Edyi0RrEEagWgkni6OEbT3BlbkFJp3KpGDCOzWQvtlxylSdw"
+# Fetch the API key from the environment variable
+apenai_api_key = os.environ.get('APENAI_API_KEY')
+
+# Check if the API key is available
+if apenai_api_key is None:
+    print("Error: Apenai API key is not set.")
+    exit()
 
 # Define maximum audio duration (in seconds)
 max_duration = 120  # 2 minutes
