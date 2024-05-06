@@ -5,5 +5,5 @@ langchain
 fastapi
 uvicorn
 python-multipart
-mangum
+pydub
 
