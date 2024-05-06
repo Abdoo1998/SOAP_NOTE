@@ -1,3 +1,5 @@
+
+
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 import wave
@@ -5,20 +7,12 @@ from openai import OpenAI
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
-import io
 import os
+import wave
 from pydub import AudioSegment
-from tempfile import NamedTemporaryFile
 
-# Replace with your actual OpenAI API key
 api_key = os.environ.get('OPENAI_API_KEY')
 
-# Check if the API key is available
-if api_key is None:
-    print("Error: Apenai API key is not set.")
-    exit()
-
-# Define maximum audio duration (in seconds)
 
 max_duration = 120  # 2 minutes
 
