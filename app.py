@@ -11,7 +11,7 @@ from pydub import AudioSegment
 from tempfile import NamedTemporaryFile
 
 # Replace with your actual OpenAI API key
-api_key = os.environ.get('APENAI_API_KEY')
+api_key = os.environ.get('OPENAI_API_KEY')
 
 # Check if the API key is available
 if api_key is None:
