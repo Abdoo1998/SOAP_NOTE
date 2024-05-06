@@ -20,7 +20,6 @@ if api_key is None:
 
 # Define maximum audio duration (in seconds)
 
-# Define maximum audio duration (in seconds)
 max_duration = 120  # 2 minutes
 
 app = FastAPI()
@@ -28,34 +27,24 @@ app = FastAPI()
 class AudioResponse(BaseModel):
     translated_text: str
 
-def convert_to_wav(audio_data):
+def split_audio_and_translate(audio_path):
     """
-    Converts audio data to WAV format.
-    """
-    with NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav_file:
-        temp_wav_filename = temp_wav_file.name
-        audio = AudioSegment.from_file(io.BytesIO(audio_data))
-        audio.export(temp_wav_filename, format="wav")
-    return temp_wav_filename
-
-def split_audio_and_translate(audio_data):
-    """
-    Splits audio data into chunks (around 1 minute), translates each chunk using OpenAI,
+    Splits audio file into chunks (around 1 minute), translates each chunk using OpenAI,
     and concatenates translations. Handles short audio chunks gracefully.
     Returns the complete translated text.
     """
-    wav_filename = convert_to_wav(audio_data)
-    with wave.open(wav_filename, 'rb') as wav_file:
+    with wave.open(audio_path, 'rb') as wav_file:
         frames = wav_file.getnframes()
         frame_rate = wav_file.getframerate()
         total_duration = frames / float(frame_rate)
 
         if total_duration <= max_duration:
             # Audio is within limit, translate directly
+            audio_file = open(audio_path, "rb")
             try:
                 translation = OpenAI(api_key=api_key).audio.translations.create(
                     model="whisper-1",
-                    file=wav_filename
+                    file=audio_file
                 )
                 return translation.text
             except Exception as e:  # Catch potential OpenAI errors
@@ -68,26 +57,28 @@ def split_audio_and_translate(audio_data):
             chunk_size = int(desired_duration * frame_rate)
             translated_text = ""
             short_chunks = []  # List to store empty translations for short chunks
-            for i in range(0, frames, chunk_size):
-                # Read chunk data
-                chunk_data = wav_file.readframes(chunk_size)
-                # Translate the chunk
-                try:
-                    chunk_translation = split_audio_and_translate(chunk_data)
-                    translated_text += chunk_translation
-                except Exception as e:  # Catch potential OpenAI errors
-                    print(f"OpenAI Error during chunk translation: {e}")
-                    short_chunks.append("")  # Store empty string for short chunk
+            with wave.open(audio_path, 'rb') as wav_file:
+                for i in range(0, frames, chunk_size):
+                    # Read chunk data
+                    chunk_data = wav_file.readframes(chunk_size)
+                    # Create temporary audio file for the chunk
+                    with wave.open(f"chunk_{i}.wav", 'wb') as chunk_file:
+                        chunk_file.setnchannels(wav_file.getnchannels())
+                        chunk_file.setsampwidth(wav_file.getsampwidth())
+                        chunk_file.setframerate(frame_rate)
+                        chunk_file.writeframes(chunk_data)
+                    # Translate the chunk
+                    try:
+                        chunk_translation = split_audio_and_translate(f"chunk_{i}.wav")
+                        translated_text += chunk_translation
+                    except Exception as e:  # Catch potential OpenAI errors
+                        print(f"OpenAI Error during chunk translation: {e}")
+                        short_chunks.append("")  # Store empty string for short chunk
+                    # Remove temporary audio file
+                    os.remove(f"chunk_{i}.wav")
             if short_chunks:
                 print(f"Warning: Encountered {len(short_chunks)} short audio chunks.")
-            os.remove(wav_filename)
-        
             return translated_text
-        
-
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
 
 @app.post("/soap_note/")
 async def create_soap_note(audio_file: UploadFile = File(...)):
