@@ -90,12 +90,25 @@ def read_root():
     return {"Hello": "World"}
 
 @app.post("/soap_note/")
-async def translate_audio(audio_file: UploadFile = File(...)):
-    # Read audio file data into memory
-    audio_data = await audio_file.read()
+async def create_soap_note(audio_file: UploadFile = File(...)):
+    # Check file extension
+    file_extension = os.path.splitext(audio_file.filename)[1].lower()
+
+    # Save audio file
+    temp_audio_path = "temp_audio.wav"
+    if file_extension == ".mp3":
+        with open("temp_audio.mp3", "wb") as temp_audio:
+            temp_audio.write(await audio_file.read())
+        # Convert MP3 to WAV
+        audio = AudioSegment.from_mp3("temp_audio.mp3")
+        audio.export(temp_audio_path, format="wav")
+        os.remove("temp_audio.mp3")
+    else:
+        with open(temp_audio_path, "wb") as temp_audio:
+            temp_audio.write(await audio_file.read())
 
     # Translate audio
-    conversation = split_audio_and_translate(audio_data)
+    conversation = split_audio_and_translate(temp_audio_path)
     openai = ChatOpenAI(model_name='gpt-4',api_key=api_key)
 
     conversation_prompt = PromptTemplate.from_template(f"""Convert the following doctor-patient dialogue ({conversation}) into a SOAP note format, ensuring correct medical terminology and including a well-structured conclusion.""")
@@ -106,8 +119,6 @@ async def translate_audio(audio_file: UploadFile = File(...)):
     data = {"conversation": conversation}
 
     medical_note = process_conversation_chain.run(data)
-
-    # Delete temporary WAV file
-    # os.remove(wav_filename)
+    os.remove(temp_audio_path)
 
     return {"medical_note": medical_note}
