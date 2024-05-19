@@ -8,6 +8,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.chains import LLMChain
 from langchain_core.prompts import PromptTemplate
 import os
+import time
 import wave
 from pydub import AudioSegment
 
@@ -74,8 +75,18 @@ def split_audio_and_translate(audio_path):
                 print(f"Warning: Encountered {len(short_chunks)} short audio chunks.")
             return translated_text
 
+
+
+import multiprocessing
+
+def process_audio_and_translate(audio_path, result_queue):
+    translation = split_audio_and_translate(audio_path)
+    result_queue.put(translation)
+
 @app.post("/soap_note/")
 async def create_soap_note(audio_file: UploadFile = File(...)):
+    start_time = time.time()
+
     # Check file extension
     file_extension = os.path.splitext(audio_file.filename)[1].lower()
 
@@ -92,18 +103,72 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
         with open(temp_audio_path, "wb") as temp_audio:
             temp_audio.write(await audio_file.read())
 
+    audio_process_time = time.time() - start_time
+    print(f"Audio processing time: {audio_process_time} seconds")
+
     # Translate audio
-    conversation = split_audio_and_translate(temp_audio_path)
-    openai = ChatOpenAI(model_name='gpt-4',api_key=api_key)
+    translate_start_time = time.time()
+    result_queue = multiprocessing.Queue()
+    process = multiprocessing.Process(target=process_audio_and_translate, args=(temp_audio_path, result_queue))
+    process.start()
+    process.join()
+    translation = result_queue.get()
+    translate_time = time.time() - translate_start_time
+    print(f"Translation time: {translate_time} seconds")
 
-    conversation_prompt = PromptTemplate.from_template(f"""Convert the following doctor-patient dialogue ({conversation}) into a SOAP note format, ensuring correct medical terminology and including a well-structured conclusion.""")
+    # OpenAI model initialization
+    openai_time = time.time()
+    openai = ChatOpenAI(model_name='gpt-4o', api_key=api_key)
+    openai_init_time = time.time() - openai_time
+    print(f"OpenAI model initialization time: {openai_init_time} seconds")
 
+    # Generating SOAP note prompt
+    prompt_time = time.time()
+    conversation_prompt = PromptTemplate.from_template(f"""You are a knowledgeable veterinarian assistant responsible for converting the following doctor-patient dialogue into a SOAP note format. Ensure the use of correct medical terminology and formal language, including a well-structured conclusion.
+                                                doctor-patient dialogue:{translation}
+                                                Extract the following information from the dialogue 
+                                                SOAP Note:
+                                                - Subjective:
+                                                - Objective:
+                                                - Assessment:
+                                                - Plan:
+                                                -conclusion
+                                                
+                                                Preventive:
+                                                - Vaccination
+                                                - Flea/tick treatment
+                                                - Deworming
+
+                                                Medications:
+                                                - Medications
+                                                - Consumables
+                                                - Others
+
+                                                Lab tests:
+                                                - Blood tests
+                                                - Urine tests
+                                                - Fecal tests
+                                                - Imaging & Diagnostic
+                                                - Cardiac Tests
+                                                - Allergy Tests
+                                                """)
+    prompt_generation_time = time.time() - prompt_time
+    print(f"Prompt generation time: {prompt_generation_time} seconds")
+
+    # Generating medical note
+    process_chain_time = time.time()
     process_conversation_chain = LLMChain(
     llm=openai, prompt=conversation_prompt)
 
-    data = {"conversation": conversation}
+    data = {"conversation": translation}
 
     medical_note = process_conversation_chain.run(data)
+    process_chain_execution_time = time.time() - process_chain_time
+    print(f"Process chain execution time: {process_chain_execution_time} seconds")
+
     os.remove(temp_audio_path)
+
+    total_time = time.time() - start_time
+    print(f"Total time taken: {total_time} seconds")
 
     return {"medical_note": medical_note}
