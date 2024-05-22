@@ -1,5 +1,4 @@
 
-
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 import wave
@@ -133,7 +132,7 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
                                                 - Assessment:
                                                 - Plan:
                                                 -conclusion
-                                                
+                                                ***Additional information***
                                                 Preventive:
                                                 - Vaccination
                                                 - Flea/tick treatment
@@ -151,6 +150,10 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
                                                 - Imaging & Diagnostic
                                                 - Cardiac Tests
                                                 - Allergy Tests
+                                                Note that the SOAP note should be structured as paragraphs and contain all the necessary information.
+                                                Additional information  should be structured as bullet points
+                                                IF any field is not found in the dialogue remove it from list.
+                                                Dont include conclusion in the additional information
                                                 """)
     prompt_generation_time = time.time() - prompt_time
     print(f"Prompt generation time: {prompt_generation_time} seconds")
