@@ -12,7 +12,25 @@ import wave
 from pydub import AudioSegment
 
 api_key = os.environ.get('OPENAI_API_KEY')
-
+defrentail_daignossi = [
+    "Behavior",
+    "Cardiology",
+    "Dentistry",
+    "Dermatology",
+    "Endocrinology and Metabolism",
+    "Gastroenterology",
+    "Hematology/Immunology",
+    "Hepatology",
+    "Infectious Disease",
+    "Musculoskeletal",
+    "Nephrology/Urology",
+    "Neurology",
+    "Oncology",
+    "Ophthalmology",
+    "Respiratory",
+    "Theriogenology",
+    "Toxicology"
+]
 
 max_duration = 120  # 2 minutes
 
@@ -151,7 +169,7 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
                                                 - Cardiac Tests
                                                 - Allergy Tests
                                                 
-                                                ***TAG*** A single keyword tag reflecting the primary condition/system according to the SOAP note. 
+                                                ***TAG*** A single keyword tag reflecting the primary condition/system according to the SOAP note it be one from this {defrentail_daignossi}
                                                 -Note that the SOAP note should be structured as paragraphs and contain all the necessary information.
                                                 -Additional information  should be structured as bullet points
                                                 -Dont include conclusion in the additional information
