@@ -125,8 +125,8 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
     prompt_time = time.time()
     conversation_prompt = PromptTemplate.from_template(f"""You are a knowledgeable veterinarian assistant responsible for converting the following doctor-patient dialogue into a SOAP note format. Ensure the use of correct medical terminology and formal language, including a well-structured conclusion.
                                                 doctor-patient dialogue:{translation}
-                                                Extract the following information from the dialogue 
-                                                SOAP Note:
+                                                Extract the following information from the dialogue if available if not remove it from the list:
+                                                **SOAP Note:
                                                 - Subjective:
                                                 - Objective:
                                                 - Assessment:
@@ -150,10 +150,11 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
                                                 - Imaging & Diagnostic
                                                 - Cardiac Tests
                                                 - Allergy Tests
-                                                Note that the SOAP note should be structured as paragraphs and contain all the necessary information.
-                                                Additional information  should be structured as bullet points
-                                                IF any field is not found in the dialogue remove it from list.
-                                                Dont include conclusion in the additional information
+                                                
+                                                ***TAG*** A single keyword tag reflecting the primary condition/system according to the SOAP note. 
+                                                -Note that the SOAP note should be structured as paragraphs and contain all the necessary information.
+                                                -Additional information  should be structured as bullet points
+                                                -Dont include conclusion in the additional information
                                                 """)
     prompt_generation_time = time.time() - prompt_time
     print(f"Prompt generation time: {prompt_generation_time} seconds")
