@@ -116,6 +116,17 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
         audio = AudioSegment.from_mp3("temp_audio.mp3")
         audio.export(temp_audio_path, format="wav")
         os.remove("temp_audio.mp3")
+        
+    elif file_extension == ".webm":
+        # Extract audio from webm using pydub
+        
+        try:
+            audio = AudioSegment.from_file(audio_file.file)
+            audio.export("temp_audio.wav", format="wav")
+        except Exception as e:
+            print(f"Error extracting audio from webm: {e}")
+            return {"error": "Failed to process webm file. Please ensure it's a valid webm audio format."}
+    
     else:
         with open(temp_audio_path, "wb") as temp_audio:
             temp_audio.write(await audio_file.read())
