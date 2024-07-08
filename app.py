@@ -1,4 +1,4 @@
-
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File
 from pydantic import BaseModel
 import wave
@@ -35,6 +35,21 @@ defrentail_daignossi = [
 max_duration = 120  # 2 minutes
 
 app = FastAPI()
+
+origins = [
+    "https://paws.vetinstant.com",
+    "http://localhost",
+    "http://localhost:4000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class AudioResponse(BaseModel):
     translated_text: str
