@@ -38,8 +38,7 @@ app = FastAPI()
 
 origins = [
     "https://paws.vetinstant.com",
-    "http://localhost",
-    "http://localhost:4000",
+    "http://localhost:3000",
 ]
 
 app.add_middleware(
