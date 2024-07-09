@@ -49,10 +49,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-class AudioResponse(BaseModel):
-    translated_text: str
-
 def split_audio_and_translate(audio_path):
     """
     Splits audio file into chunks (around 1 minute), translates each chunk using OpenAI,
