@@ -109,6 +109,9 @@ import multiprocessing
 def process_audio_and_translate(audio_path, result_queue):
     translation = split_audio_and_translate(audio_path)
     result_queue.put(translation)
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the SOAP note generator API"}
 
 @app.post("/soap_note/")
 async def create_soap_note(audio_file: UploadFile = File(...)):
