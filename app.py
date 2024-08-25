@@ -169,7 +169,7 @@ async def create_soap_note(audio_file: UploadFile = File(...)):
                                                1. Role: You are a knowledgeable veterinarian assistant.
 
                                                 2. Task: Convert the following doctor-patient dialogue into a SOAP note format.
-                                                   Doctor-patient dialogue: {{translation}}
+                                                   Doctor-patient dialogue: {translation}
                                                 
                                                 3. Language: Ensure the use of correct medical terminology and formal language.
                                                 
