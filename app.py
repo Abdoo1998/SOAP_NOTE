@@ -10,12 +10,14 @@ import os
 import time
 from pydub import AudioSegment
 import multiprocessing
+import json
+import re
 
 # Load the API key
 api_key = os.environ.get('OPENAI_API_KEY')
 
 # Differential diagnosis list
-defrentail_daignossi = [
+differential_diagnosis = [
     "Behavior", "Cardiology", "Dentistry", "Dermatology", "Endocrinology and Metabolism",
     "Gastroenterology", "Hematology/Immunology", "Hepatology", "Infectious Disease",
     "Musculoskeletal", "Nephrology/Urology", "Neurology", "Oncology", "Ophthalmology",
@@ -146,13 +148,13 @@ async def create_soap_note(
 
     # OpenAI model initialization
     openai_time = time.time()
-    openai = ChatOpenAI(model_name='gpt-4o', api_key=api_key)
+    openai = ChatOpenAI(model_name='gpt-4', api_key=api_key)
     openai_init_time = time.time() - openai_time
     print(f"OpenAI model initialization time: {openai_init_time} seconds")
 
     # Generating SOAP note prompt
     prompt_time = time.time()
-    conversation_prompt = PromptTemplate.from_template(f"""
+    conversation_prompt = PromptTemplate.from_template("""
         1. Role: You are a knowledgeable veterinarian assistant.
 
         2. Task: Convert the following doctor-patient dialogue and medical history into a SOAP note format.
@@ -176,16 +178,29 @@ async def create_soap_note(
         
         11. System Instructions:
             a. Ensure that the conclusion is always correctly derived and published.
-            b. Ensure that the differential diagnosis derived from the conversation is always in the form this list: {defrentail_daignossi}
+            b. Ensure that the differential diagnosis derived from the conversation is always in the form of this list: {differential_diagnosis}
             c. Stick to the conversation transcribed and avoid any form of hallucination.
         
-        13. Structure:
-            a. The SOAP note should be structured as paragraphs and contain all the necessary information.
-            b. Additional information should be structured as bullet points.
-            c. Do not include the conclusion in the additional information.
+        12. Output Format: Structure your response as follows:
+            Subjective:
+            [Subjective content here]
+
+            Objective:
+            [Objective content here]
+
+            Assessment:
+            [Assessment content here]
+
+            Plan:
+            [Plan content here]
+
+            Conclusion:
+            [Conclusion content here]
+
+            DifferentialDiagnosis:
+            [Differential Diagnosis here]
         
         Remember to maintain a professional tone throughout the document and ensure all information is relevant to veterinary practice.
-        Don't include the conclusion in the additional information.
     """)
     prompt_generation_time = time.time() - prompt_time
     print(f"Prompt generation time: {prompt_generation_time} seconds")
@@ -196,15 +211,30 @@ async def create_soap_note(
         llm=openai, prompt=conversation_prompt
     )
 
-    data = {"conversation": full_text}
+    data = {"full_text": full_text, "differential_diagnosis": differential_diagnosis}
 
-    medical_note = process_conversation_chain.run(data)
+    medical_note_text = process_conversation_chain.run(data)
     process_chain_execution_time = time.time() - process_chain_time
     print(f"Process chain execution time: {process_chain_execution_time} seconds")
+
+    # Post-process the output to ensure correct format
+    def extract_section(text, section):
+        pattern = rf"{section}:(.*?)(?:\n\n|\Z)"
+        match = re.search(pattern, text, re.DOTALL)
+        return match.group(1).strip() if match else ""
+
+    medical_note = {
+        "Subjective": extract_section(medical_note_text, "Subjective"),
+        "Objective": extract_section(medical_note_text, "Objective"),
+        "Assessment": extract_section(medical_note_text, "Assessment"),
+        "Plan": extract_section(medical_note_text, "Plan"),
+        "Conclusion": extract_section(medical_note_text, "Conclusion"),
+        "DifferentialDiagnosis": extract_section(medical_note_text, "DifferentialDiagnosis")
+    }
 
     os.remove(temp_audio_path)
 
     total_time = time.time() - start_time
     print(f"Total time taken: {total_time} seconds")
 
-    return {"medical_note": medical_note}
+    return medical_note
