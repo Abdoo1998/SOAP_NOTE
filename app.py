@@ -162,9 +162,15 @@ async def create_soap_note(
         
         3. Language: Ensure the use of correct medical terminology and formal language.
         
-        4. Format: Use the SOAP note format (Subjective, Objective, Assessment, and Plan).
+        4. Format: Use the SOAP note format (Subjective, Objective, Assessment, Plan, DeferentialDiagnosis, and Conclusion).
         
-        5. Differential Diagnosis: Derive a differential diagnosis heading from the conversation in the format of "System-Condition". Example: Dermatology-Atopic Dermatitis.
+        5. DeferentialDiagnosis: This section is crucial and must be included. Follow these guidelines:
+           a. Provide at least one deferential diagnosis, and up to a maximum of five when possible.
+           b. Format each diagnosis as "System - Condition". For example: "Dermatology - Atopic Dermatitis".
+           c. List the deferential diagnoses in order of likelihood, with the most probable first.
+           d. If the information is insufficient for multiple diagnoses, provide at least one potential diagnosis or area of concern.
+           e. If no clear deferential diagnosis can be determined, explicitly state: "Insufficient information for a deferential diagnosis. Further diagnostics recommended."
+           f. Ensure that the deferential diagnoses are relevant to the systems mentioned in this list: {differential_diagnosis}
         
         6. Comprehensiveness: Ensure that all aspects relevant to the diagnosis, treatment, and plan from the conversation are added to the medical documentation.
         
@@ -174,12 +180,12 @@ async def create_soap_note(
         
         9. Professionalism: Ensure that the medical documentation follows a professional veterinary documentation standard.
         
-        10. Conclusion: Include a well-structured conclusion after the SOAP format.
+        10. Conclusion: Include a well-structured conclusion after the DeferentialDiagnosis section.
         
         11. System Instructions:
             a. Ensure that the conclusion is always correctly derived and published.
-            b. Ensure that the differential diagnosis derived from the conversation is always in the form of this list: {differential_diagnosis}
-            c. Stick to the conversation transcribed and avoid any form of hallucination.
+            b. Stick to the conversation transcribed and avoid any form of hallucination.
+            c. Always include a DeferentialDiagnosis section, even if it's to state that further diagnostics are needed.
         
         12. Output Format: Structure your response as follows:
             Subjective:
@@ -194,11 +200,11 @@ async def create_soap_note(
             Plan:
             [Plan content here]
 
+            DeferentialDiagnosis:
+            [DeferentialDiagnosis content here, following the guidelines in point 5]
+
             Conclusion:
             [Conclusion content here]
-
-            DifferentialDiagnosis:
-            [Differential Diagnosis here]
         
         Remember to maintain a professional tone throughout the document and ensure all information is relevant to veterinary practice.
     """)
@@ -211,9 +217,12 @@ async def create_soap_note(
         llm=openai, prompt=conversation_prompt
     )
 
-    data = {"full_text": full_text, "differential_diagnosis": differential_diagnosis}
+    data = {
+        "full_text": full_text,
+        "differential_diagnosis": differential_diagnosis
+    }
 
-    medical_note_text = process_conversation_chain.run(data)
+    medical_note_text = process_conversation_chain.invoke(data)
     process_chain_execution_time = time.time() - process_chain_time
     print(f"Process chain execution time: {process_chain_execution_time} seconds")
 
@@ -232,9 +241,30 @@ async def create_soap_note(
         "DifferentialDiagnosis": extract_section(medical_note_text, "DifferentialDiagnosis")
     }
 
+    # Ensure DifferentialDiagnosis is not empty
+    if not medical_note["DifferentialDiagnosis"] or medical_note["DifferentialDiagnosis"].lower() in ["none", "n/a", ""]:
+        # If DifferentialDiagnosis is empty, try to generate one based on the Assessment
+        assessment = medical_note["Assessment"]
+        if assessment:
+            # Use GPT to generate a differential diagnosis based on the assessment
+            diff_diag_prompt = PromptTemplate.from_template("""
+                Based on the following assessment, provide a differential diagnosis 
+                If no clear differential diagnosis can be determined, state "No clear differential diagnosis can be determined based on the given information."
+                
+                Assessment: {assessment}
+                
+                DifferentialDiagnosis:
+            """)
+            diff_diag_chain = LLMChain(llm=openai, prompt=diff_diag_prompt)
+            diff_diag = diff_diag_chain.run({"assessment": assessment})
+            medical_note["DifferentialDiagnosis"] = diff_diag.strip()
+        else:
+            medical_note["DifferentialDiagnosis"] = "No clear differential diagnosis can be determined based on the given information."
+
     os.remove(temp_audio_path)
 
     total_time = time.time() - start_time
     print(f"Total time taken: {total_time} seconds")
 
     return medical_note
+
