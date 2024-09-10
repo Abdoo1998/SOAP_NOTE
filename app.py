@@ -176,7 +176,7 @@ async def create_soap_note(
         
         10. Conclusion: Include a well-structured conclusion after the SOAP format.
         
-        11. DifferentialDiagnosis: Ensure that the differential diagnosis derived from the conversation is always in the form of this list: {differential_diagnosis}.
+        11. DifferentialDiagnosis:  A single keyword tag reflecting the primary condition/system according to the SOAP note it be one from this {defrentail_daignossi}.
         
         12. System Instructions:
             a. Ensure that the conclusion is always correctly derived and published.
