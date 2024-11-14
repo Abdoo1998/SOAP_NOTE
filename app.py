@@ -1,5 +1,5 @@
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 import wave
 from openai import OpenAI
@@ -12,9 +12,17 @@ from pydub import AudioSegment
 import multiprocessing
 import json
 import re
+from typing import Dict, Any
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load the API key
 api_key = os.environ.get('OPENAI_API_KEY')
+if not api_key:
+    raise ValueError("OPENAI_API_KEY environment variable is not set")
 
 # Differential diagnosis list
 differential_diagnosis = [
@@ -24,11 +32,14 @@ differential_diagnosis = [
     "Respiratory", "Theriogenology", "Toxicology"
 ]
 
-# Maximum duration for audio processing
-max_duration = 120  # 2 minutes
+# Constants
+MAX_AUDIO_DURATION = 120  # 2 minutes
+CHUNK_DURATION = 60  # 1 minute
+ALLOWED_EXTENSIONS = {'.wav', '.mp3', '.webm'}
+TEMP_AUDIO_PATH = "temp_audio.wav"
 
 # FastAPI app initialization
-app = FastAPI()
+app = FastAPI(title="SOAP Note Generator API")
 
 # CORS settings
 origins = [
@@ -44,200 +55,227 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def split_audio_and_translate(audio_path):
-    """
-    Splits audio file into chunks, translates each chunk using OpenAI,
-    and concatenates translations. Handles short audio chunks gracefully.
-    Returns the complete translated text.
-    """
-    with wave.open(audio_path, 'rb') as wav_file:
-        frames = wav_file.getnframes()
-        frame_rate = wav_file.getframerate()
-        total_duration = frames / float(frame_rate)
+class AudioProcessingError(Exception):
+    """Custom exception for audio processing errors"""
+    pass
 
-        if total_duration <= max_duration:
-            # Audio is within limit, translate directly
-            audio_file = open(audio_path, "rb")
-            try:
-                translation = OpenAI(api_key=api_key).audio.translations.create(
-                    model="whisper-1",
-                    file=audio_file
-                )
-                return translation.text
-            except Exception as e:
-                print(f"OpenAI Error during translation: {e}")
-                return ""
+def validate_audio_file(filename: str) -> bool:
+    """Validate audio file extension"""
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in ALLOWED_EXTENSIONS
 
-        else:
-            # Split audio into chunks and translate each
-            desired_duration = 60  # 1 minute
-            chunk_size = int(desired_duration * frame_rate)
+def convert_to_wav(input_path: str, output_path: str) -> None:
+    """Convert audio file to WAV format"""
+    try:
+        audio = AudioSegment.from_file(input_path)
+        audio.export(output_path, format="wav")
+    except Exception as e:
+        raise AudioProcessingError(f"Error converting audio: {str(e)}")
+
+def split_audio_and_translate(audio_path: str) -> str:
+    """
+    Split audio file into chunks and translate using OpenAI
+    """
+    try:
+        with wave.open(audio_path, 'rb') as wav_file:
+            frames = wav_file.getnframes()
+            frame_rate = wav_file.getframerate()
+            total_duration = frames / float(frame_rate)
+
+            if total_duration <= MAX_AUDIO_DURATION:
+                # Audio is within limit, translate directly
+                with open(audio_path, "rb") as audio_file:
+                    client = OpenAI(api_key=api_key)
+                    translation = client.audio.translations.create(
+                        model="whisper-1",
+                        file=audio_file
+                    )
+                    return translation.text
+
+            # Split longer audio into chunks
             translated_text = ""
-            with wave.open(audio_path, 'rb') as wav_file:
-                for i in range(0, frames, chunk_size):
-                    chunk_data = wav_file.readframes(chunk_size)
-                    with wave.open(f"chunk_{i}.wav", 'wb') as chunk_file:
+            chunk_size = int(CHUNK_DURATION * frame_rate)
+            
+            for i in range(0, frames, chunk_size):
+                chunk_path = f"chunk_{i}.wav"
+                try:
+                    # Write chunk to temporary file
+                    with wave.open(chunk_path, 'wb') as chunk_file:
                         chunk_file.setnchannels(wav_file.getnchannels())
                         chunk_file.setsampwidth(wav_file.getsampwidth())
                         chunk_file.setframerate(frame_rate)
-                        chunk_file.writeframes(chunk_data)
-                    try:
-                        chunk_translation = split_audio_and_translate(f"chunk_{i}.wav")
-                        translated_text += chunk_translation
-                    except Exception as e:
-                        print(f"OpenAI Error during chunk translation: {e}")
-                    os.remove(f"chunk_{i}.wav")
-            return translated_text
+                        wav_file.setpos(i)
+                        chunk_file.writeframes(wav_file.readframes(chunk_size))
+                    
+                    # Translate chunk
+                    chunk_translation = split_audio_and_translate(chunk_path)
+                    translated_text += chunk_translation + " "
+                finally:
+                    if os.path.exists(chunk_path):
+                        os.remove(chunk_path)
 
-def process_audio_and_translate(audio_path, result_queue):
-    translation = split_audio_and_translate(audio_path)
-    result_queue.put(translation)
+            return translated_text.strip()
+
+    except Exception as e:
+        raise AudioProcessingError(f"Error processing audio: {str(e)}")
+
+def process_audio_and_translate(audio_path: str, result_queue: multiprocessing.Queue) -> None:
+    """Process audio in a separate process"""
+    try:
+        translation = split_audio_and_translate(audio_path)
+        result_queue.put(translation)
+    except Exception as e:
+        result_queue.put(f"Error: {str(e)}")
+
+def create_soap_note_prompt() -> PromptTemplate:
+    """Create the SOAP note prompt template"""
+    template = """
+    1. Role: You are a knowledgeable veterinarian assistant.
+
+    2. Task: Convert the following doctor-patient dialogue and medical history into a SOAP note format.
+       Doctor-patient dialogue and medical history: {full_text}
+    
+    3. Language: Ensure the use of correct medical terminology and formal language.
+    
+    4. Format: Use the SOAP note format (Subjective, Objective, Assessment, and Plan).
+    
+    5. Differential Diagnosis: Derive a differential diagnosis heading from the conversation in the format of "System-Condition".
+    
+    6. Comprehensiveness: Include all relevant diagnosis, treatment, and plan details from the conversation.
+    
+    7. Accuracy: Stick to the conversation transcribed and avoid any form of hallucination.
+    
+    8. Relevance: Focus on relevant medical aspects for veterinary SOAP notes.
+    
+    9. Professionalism: Follow professional veterinary documentation standards.
+    
+    10. Conclusion: Include a well-structured conclusion after the SOAP format.
+    
+    11. DifferentialDiagnosis: Select a primary condition/system from this list: {differential_diagnosis}
+    
+    Output Format:
+    Subjective:
+    [Subjective content here]
+
+    Objective:
+    [Objective content here]
+
+    Assessment:
+    [Assessment content here]
+
+    Plan:
+    [Plan content here]
+
+    Conclusion:
+    [Conclusion content here]
+
+    DifferentialDiagnosis:
+    [Differential Diagnosis here]
+    """
+    return PromptTemplate.from_template(template)
+
+def extract_section(text: str, section: str) -> str:
+    """Extract a section from the medical note text"""
+    pattern = rf"{section}:(.*?)(?:\n\n|\Z)"
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else ""
+
+def process_medical_note(text: str) -> Dict[str, str]:
+    """Process the medical note text into structured format"""
+    sections = ["Subjective", "Objective", "Assessment", "Plan", "Conclusion", "DifferentialDiagnosis"]
+    return {section: extract_section(text, section) for section in sections}
 
 @app.get("/")
 async def read_root():
-    return {"message": "Welcome to the SOAP note generator API"}
+    """Root endpoint"""
+    return {"message": "Welcome to the SOAP note generator API", "status": "active"}
 
 @app.post("/soap_note/")
 async def create_soap_note(
     audio_file: UploadFile = File(...),
     medical_history: str = Form(...)
-):
+) -> Dict[str, Any]:
+    """
+    Create a SOAP note from audio file and medical history
+    """
     start_time = time.time()
+    logger.info(f"Starting SOAP note generation for file: {audio_file.filename}")
 
-    # Check file extension
-    file_extension = os.path.splitext(audio_file.filename)[1].lower()
+    try:
+        # Validate file
+        if not validate_audio_file(audio_file.filename):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format. Supported formats: WAV, MP3, WEBM"
+            )
 
-    # Save audio file
-    temp_audio_path = "temp_audio.wav"
-    if file_extension == ".mp3":
-        with open("temp_audio.mp3", "wb") as temp_audio:
-            temp_audio.write(await audio_file.read())
-        # Convert MP3 to WAV
-        audio = AudioSegment.from_mp3("temp_audio.mp3")
-        audio.export(temp_audio_path, format="wav")
-        os.remove("temp_audio.mp3")
+        # Save and process audio file
+        file_extension = os.path.splitext(audio_file.filename)[1].lower()
+        temp_input_path = f"temp_input{file_extension}"
         
-    elif file_extension == ".webm":
-        # Extract audio from webm using pydub
         try:
-            audio = AudioSegment.from_file(audio_file.file)
-            audio.export(temp_audio_path, format="wav")
-        except Exception as e:
-            print(f"Error extracting audio from webm: {e}")
-            return {"error": "Failed to process webm file. Please ensure it's a valid webm audio format."}
-    
-    else:
-        with open(temp_audio_path, "wb") as temp_audio:
-            temp_audio.write(await audio_file.read())
+            # Save uploaded file
+            with open(temp_input_path, "wb") as temp_file:
+                temp_file.write(await audio_file.read())
 
-    audio_process_time = time.time() - start_time
-    print(f"Audio processing time: {audio_process_time} seconds")
+            # Convert to WAV if needed
+            if file_extension != '.wav':
+                convert_to_wav(temp_input_path, TEMP_AUDIO_PATH)
+            else:
+                os.rename(temp_input_path, TEMP_AUDIO_PATH)
 
-    # Translate audio
-    translate_start_time = time.time()
-    result_queue = multiprocessing.Queue()
-    process = multiprocessing.Process(target=process_audio_and_translate, args=(temp_audio_path, result_queue))
-    process.start()
-    process.join()
-    translation = result_queue.get()
-    translate_time = time.time() - translate_start_time
-    print(f"Translation time: {translate_time} seconds")
+            # Translate audio
+            result_queue = multiprocessing.Queue()
+            process = multiprocessing.Process(
+                target=process_audio_and_translate,
+                args=(TEMP_AUDIO_PATH, result_queue)
+            )
+            process.start()
+            process.join(timeout=300)  # 5 minutes timeout
 
-    # Combine medical history with translated text
-    full_text = f"Medical History: {medical_history}\n\nConversation: {translation}"
+            if process.is_alive():
+                process.terminate()
+                raise HTTPException(
+                    status_code=408,
+                    detail="Audio processing timeout"
+                )
 
-    # OpenAI model initialization
-    openai_time = time.time()
-    openai = ChatOpenAI(model_name='gpt-4', api_key=api_key)
-    openai_init_time = time.time() - openai_time
-    print(f"OpenAI model initialization time: {openai_init_time} seconds")
+            translation = result_queue.get()
+            if isinstance(translation, str) and translation.startswith("Error:"):
+                raise HTTPException(
+                    status_code=500,
+                    detail=translation
+                )
 
-    # Generating SOAP note prompt
-    prompt_time = time.time()
-    conversation_prompt = PromptTemplate.from_template("""
-        1. Role: You are a knowledgeable veterinarian assistant.
+            # Combine medical history with translated text
+            full_text = f"Medical History: {medical_history}\n\nConversation: {translation}"
 
-        2. Task: Convert the following doctor-patient dialogue and medical history into a SOAP note format.
-           Doctor-patient dialogue and medical history: {full_text}
-        
-        3. Language: Ensure the use of correct medical terminology and formal language.
-        
-        4. Format: Use the SOAP note format (Subjective, Objective, Assessment, and Plan).
-        
-        5. Differential Diagnosis: Derive a differential diagnosis heading from the conversation in the format of "System-Condition". Example: Dermatology-Atopic Dermatitis.
-        
-        6. Comprehensiveness: Ensure that all aspects relevant to the diagnosis, treatment, and plan from the conversation are added to the medical documentation.
-        
-        7. Accuracy: Stick to the conversation transcribed and avoid any form of hallucination.
-        
-        8. Relevance: Include relevant medical aspects to veterinary SOAP notes and avoid all other general conversations.
-        
-        9. Professionalism: Ensure that the medical documentation follows a professional veterinary documentation standard.
-        
-        10. Conclusion: Include a well-structured conclusion after the SOAP format.
-        
-        11. DifferentialDiagnosis:  A single keyword tag reflecting the primary condition/system according to the SOAP note it be one from this {differential_diagnosis}.
-        
-        12. System Instructions:
-            a. Ensure that the conclusion is always correctly derived and published.
-            b. Ensure that the DifferentialDiagnosis derived from the conversation is always in the form of this list: {differential_diagnosis}
-            c. Stick to the conversation transcribed and avoid any form of hallucination.
-        
-        12. Output Format: Structure your response as follows:
-            Subjective:
-            [Subjective content here]
+            # Generate SOAP note
+            llm = ChatOpenAI(model_name='gpt-4', api_key=api_key)
+            prompt = create_soap_note_prompt()
+            chain = LLMChain(llm=llm, prompt=prompt)
+            
+            medical_note_text = chain.run({
+                "full_text": full_text,
+                "differential_diagnosis": differential_diagnosis
+            })
 
-            Objective:
-            [Objective content here]
+            # Process and structure the note
+            medical_note = process_medical_note(medical_note_text)
 
-            Assessment:
-            [Assessment content here]
+            logger.info(f"SOAP note generated successfully. Time taken: {time.time() - start_time:.2f} seconds")
+            return medical_note
 
-            Plan:
-            [Plan content here]
+        finally:
+            # Cleanup temporary files
+            for file_path in [temp_input_path, TEMP_AUDIO_PATH]:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
 
-            Conclusion:
-            [Conclusion content here]
-
-            DifferentialDiagnosis:
-            [Differential Diagnosis here]
-        
-        Remember to maintain a professional tone throughout the document and ensure all information is relevant to veterinary practice.
-    """)
-    prompt_generation_time = time.time() - prompt_time
-    print(f"Prompt generation time: {prompt_generation_time} seconds")
-
-    # Generating medical note
-    process_chain_time = time.time()
-    process_conversation_chain = LLMChain(
-        llm=openai, prompt=conversation_prompt
-    )
-
-    data = {"full_text": full_text, "differential_diagnosis": differential_diagnosis}
-
-    medical_note_text = process_conversation_chain.run(data)
-    process_chain_execution_time = time.time() - process_chain_time
-    print(f"Process chain execution time: {process_chain_execution_time} seconds")
-
-    # Post-process the output to ensure correct format
-    def extract_section(text, section):
-        pattern = rf"{section}:(.*?)(?:\n\n|\Z)"
-        match = re.search(pattern, text, re.DOTALL)
-        return match.group(1).strip() if match else ""
-
-    medical_note = {
-        "Subjective": extract_section(medical_note_text, "Subjective"),
-        "Objective": extract_section(medical_note_text, "Objective"),
-        "Assessment": extract_section(medical_note_text, "Assessment"),
-        "Plan": extract_section(medical_note_text, "Plan"),
-        "Conclusion": extract_section(medical_note_text, "Conclusion"),
-        "DifferentialDiagnosis": extract_section(medical_note_text, "DifferentialDiagnosis")
-    }
-
-    os.remove(temp_audio_path)
-
-    total_time = time.time() - start_time
-    print(f"Total time taken: {total_time} seconds")
-
-    return medical_note
+    except Exception as e:
+        logger.error(f"Error in SOAP note generation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing request: {str(e)}"
+        )
 
